@@ -29,8 +29,8 @@ mongoose
   .catch((err) => console.error(err));
 
 // load routes dynamically
-readdirSync("./Routes").map((r) => {
-  const route = require(`./Routes/${r}`);
+readdirSync("./routes").map((r) => {
+  const route = require(`./routes/${r}`);
   if (route && typeof route === "function") {
     app.use("/api", route);
     console.log(`Route ${r} loaded successfully.`);
