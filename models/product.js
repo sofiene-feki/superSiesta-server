@@ -23,6 +23,9 @@ const productSchema = new mongoose.Schema(
     Description: String,
     Price: { type: Number, default: 0 },
     promotion: { type: Number, default: 0 }, // percentage
+    Quantity: { type: Number, default: 0 },
+    sold: { type: Number, default: 0 },
+    isProductOfTheYear: { type: Boolean, default: false },
     Image: String,
     pdf: String,
     video: String,

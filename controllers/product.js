@@ -118,12 +118,6 @@ exports.update = async (req, res) => {
       }));
     }
 
-    // -------------------------
-    // Handle media deletion / addition
-    // -------------------------
-    console.log("📌 Existing media IDs from client:", body.existingMediaIds);
-    console.log("📌 Existing media in DB before update:", existing.media);
-
     let updatedMedia = (existing.media || []).filter((m) =>
       body.existingMediaIds.includes(m._id.toString())
     );
@@ -152,22 +146,6 @@ exports.update = async (req, res) => {
 
     body.media = updatedMedia;
     console.log("✅ Final media array to save:", updatedMedia);
-
-    // -------------------------
-    // Handle single uploads
-    // -------------------------
-    if (files?.imageFile) {
-      if (existing.Image) await deleteFile(existing.Image);
-      body.Image = `/uploads/images/${files.imageFile[0].filename}`;
-    }
-    if (files?.pdf) {
-      if (existing.pdf) await deleteFile(existing.pdf);
-      body.pdf = `/uploads/pdfs/${files.pdf[0].filename}`;
-    }
-    if (files?.video) {
-      if (existing.video) await deleteFile(existing.video);
-      body.video = `/uploads/videos/${files.video[0].filename}`;
-    }
 
     if (body.Title) body.slug = slugify(body.Title);
 
@@ -202,31 +180,218 @@ exports.remove = async (req, res) => {
 // LIST PRODUCTS with filters/pagination
 exports.list = async (req, res) => {
   try {
-    let { page = 1, itemsPerPage = 10, filters = {}, sort = "new" } = req.body;
+    console.log("📥 Request body:", req.body); // <-- log incoming payload
+
+    let { page = 0, itemsPerPage = 12, filters = {}, sort = "new" } = req.body;
+
+    // Parse safely
     page = parseInt(page);
     itemsPerPage = parseInt(itemsPerPage);
-    const skip = (page - 1) * itemsPerPage;
 
-    let sortCriteria = sort === "best" ? { sold: -1 } : { createdAt: -1 };
+    if (isNaN(page) || page < 0) page = 0; // allow 0-based
+    if (isNaN(itemsPerPage) || itemsPerPage < 1) itemsPerPage = 12;
 
+    const skip = page * itemsPerPage;
+
+    const sortCriteria = (() => {
+      switch (sort) {
+        case "best":
+          return { sold: -1 };
+        case "Price: Low to High":
+          return { Price: 1 };
+        case "Price: High to Low":
+          return { Price: -1 };
+        case "new":
+        default:
+          return { createdAt: -1 };
+      }
+    })();
+
+    const appliedFilters = filters.selected || filters;
     const query = {};
-    if (filters.category) query.Category = { $in: filters.category };
-    if (filters.color) query["colors.value"] = { $in: filters.color };
-    if (filters.brand) query.Brand = { $in: filters.brand };
+
+    Object.keys(appliedFilters).forEach((key) => {
+      const value = appliedFilters[key];
+      if (Array.isArray(value) && value.length) {
+        if (key === "priceRange" && value.length === 2) {
+          query.Price = { $gte: value[0], $lte: value[1] };
+        } else {
+          const fieldMap = {
+            category: "Category",
+            color: "colors.value",
+            brand: "Brand",
+            size: "size",
+          };
+          const dbField = fieldMap[key] || key;
+          query[dbField] = { $in: value };
+        }
+      }
+    });
 
     const products = await Product.find(query)
       .sort(sortCriteria)
       .skip(skip)
       .limit(itemsPerPage);
     const total = await Product.countDocuments(query);
+    const totalPages = Math.ceil(total / itemsPerPage);
 
-    res.json({
-      products,
-      totalPages: Math.ceil(total / itemsPerPage),
-      total,
-      currentPage: page,
-    });
+    res.json({ products, totalPages, total, currentPage: page });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+};
+
+exports.getProductsByCategory = async (req, res) => {
+  try {
+    const { category } = req.params;
+    const page = parseInt(req.query.page) || 0;
+    const itemsPerPage = parseInt(req.query.itemsPerPage) || 12;
+    const sortOption = req.query.sort || "createdAt";
+
+    // Count total products
+    const total = await Product.countDocuments({
+      Category: category,
+    });
+
+    // Fetch products with pagination & sort
+    const products = await Product.find({ Category: category })
+      .sort({ [sortOption]: 1 })
+      .skip(page * itemsPerPage)
+      .limit(itemsPerPage);
+
+    const totalPages = Math.ceil(total / itemsPerPage);
+
+    res.json({ products, total, totalPages, currentPage: page });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error", error });
+  }
+};
+
+exports.getNewArrivals = async (req, res) => {
+  try {
+    // Fetch latest 5 products
+    const products = await Product.find({})
+      .sort({ updatedAt: -1 }) // newest first
+      .limit(5);
+
+    res.json({ products });
+  } catch (err) {
+    console.error("❌ Error fetching new arrivals:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+exports.getBestSellers = async (req, res) => {
+  try {
+    // Fetch latest 5 products
+    const products = await Product.find({})
+      .sort({ sold: -1 }) // newest first
+      .limit(5);
+
+    res.json({ products });
+  } catch (err) {
+    console.error("❌ Error fetching new arrivals:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+// Search products by title or description
+exports.search = async (req, res) => {
+  try {
+    const { query = "", page = 0, itemsPerPage = 12 } = req.body;
+
+    // Parse numbers safely
+    const currentPage = parseInt(page) || 0;
+    const limit = parseInt(itemsPerPage) || 12;
+    const skip = currentPage * limit;
+
+    // Regex search, case-insensitive
+    const searchRegex = new RegExp(query, "i");
+
+    const filter = {
+      $or: [{ Title: searchRegex }, { Description: searchRegex }],
+    };
+
+    const products = await Product.find(filter)
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 });
+
+    const total = await Product.countDocuments(filter);
+    const totalPages = Math.ceil(total / limit);
+
+    res.json({ products, total, totalPages, currentPage });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// controllers/productController.js
+exports.getAllProductTitles = async (req, res) => {
+  try {
+    const products = await Product.find({}, "Title slug");
+    res.json(products);
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error });
+  }
+};
+
+// ✅ Get single product by slug
+exports.getProductBySlug = async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const product = await Product.findOne({ slug });
+
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    res.json(product);
+  } catch (error) {
+    console.error("❌ Error fetching product by slug:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// ✅ Set product of the year
+exports.setProductOfTheYear = async (req, res) => {
+  try {
+    const { slug } = req.params;
+
+    // reset previous product of the year
+    await Product.updateMany(
+      { isProductOfTheYear: true },
+      { $set: { isProductOfTheYear: false } }
+    );
+
+    // set the new one
+    const product = await Product.findOneAndUpdate(
+      { slug },
+      { $set: { isProductOfTheYear: true } },
+      { new: true }
+    );
+
+    if (!product) return res.status(404).json({ message: "Product not found" });
+
+    res.json({ success: true, product });
+  } catch (error) {
+    console.error("❌ Error setting product of the year:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// ✅ Get product of the year
+exports.getProductOfTheYear = async (req, res) => {
+  try {
+    const product = await Product.findOne({ isProductOfTheYear: true });
+
+    if (!product) {
+      return res.status(404).json({ message: "No product of the year found" });
+    }
+
+    res.json(product);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
 };

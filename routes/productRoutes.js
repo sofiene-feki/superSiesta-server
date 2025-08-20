@@ -7,6 +7,14 @@ const {
   update,
   remove,
   list,
+  getNewArrivals,
+  search,
+  getAllProductTitles,
+  setProductOfTheYear,
+  getProductBySlug,
+  getProductOfTheYear,
+  getBestSellers,
+  getProductsByCategory,
 } = require("../controllers/product");
 
 // multer setup
@@ -48,15 +56,24 @@ router.put(
   ]),
   update
 );
+router.post("/products", list);
+router.get("/products/new-arrivals", getNewArrivals);
+router.get("/products/best-sellers", getBestSellers);
+router.get("/category/:category", getProductsByCategory);
 
 // DELETE
 router.delete("/product/:slug", remove);
 
 // READ (generic slug goes last!)
 router.get("/product/:slug", read);
+router.post("/products/search", search);
+
+router.put("/product/specialOffre/:slug", setProductOfTheYear);
+router.get("/getProductOfTheYear", getProductOfTheYear); // ✅ new route
+router.get("/titles", getAllProductTitles);
+router.get("/specialOffre/:slug", getProductBySlug);
 
 // LIST
-router.post("/products", list);
 
 console.log("✅ Product router loaded with routes:");
 router.stack.forEach((r) => {
