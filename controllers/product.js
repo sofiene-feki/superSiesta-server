@@ -330,7 +330,7 @@ exports.search = async (req, res) => {
 // controllers/productController.js
 exports.getAllProductTitles = async (req, res) => {
   try {
-    const products = await Product.find({}, "Title slug");
+    const products = await Product.find({}, "Title slug sizes colors");
     res.json(products);
   } catch (error) {
     res.status(500).json({ message: "Server error", error });
